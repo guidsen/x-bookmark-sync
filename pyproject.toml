@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "x-bookmark-sync"
-version = "1.0.0"
+version = "1.1.0"
 description = "Incrementally archive X bookmarks with the official xurl CLI"
 readme = "README.md"
 requires-python = ">=3.9"

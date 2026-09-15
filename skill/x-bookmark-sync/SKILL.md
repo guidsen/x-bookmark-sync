@@ -1,7 +1,7 @@
 ---
 name: x-bookmark-sync
 description: "Use when archiving X bookmarks through official xurl. Runs safe incremental exports without inspecting credentials."
-version: 1.0.0
+version: 1.1.0
 author: Guido Schmitz
 license: MIT
 platforms: [linux, macos, windows]
@@ -52,6 +52,23 @@ x-bookmark-sync --output-dir /absolute/private/archive --format json --format ma
 
 Keep `json` selected to persist the canonical `bookmarks.json` archive for the next merge.
 
+## Bookmark folders
+
+List folders without exposing credentials:
+
+```bash
+x-bookmark-sync --list-folders
+```
+
+Archive one folder by case-insensitive name or numeric ID:
+
+```bash
+x-bookmark-sync --folder "AI Research" --output-dir /absolute/private/archive
+x-bookmark-sync --folder-id 1234567890123456789 --output-dir /absolute/private/archive
+```
+
+Folder exports are isolated under `OUTPUT_DIR/folders/FOLDER-SLUG-FOLDER-ID/`. The CLI uses xurl raw API calls to retrieve folder membership, then hydrates the returned Post IDs with complete Post and author data. Warn the user that this requires extra billable X API reads.
+
 ## Offline or test run
 
 ```bash
@@ -83,6 +100,8 @@ Do not display bookmark contents unless the user explicitly asks; report counts 
 The CLI merges by post ID. A newly fetched record replaces the same archived ID, while IDs absent from the latest response are preserved. Output ordering is deterministic.
 
 The official `xurl bookmarks` shortcut currently returns at most the latest 100 per invocation. There is no pagination in this utility. Running it regularly grows the local archive incrementally, but the first run cannot recover bookmarks already outside the latest-100 window. Absence from a fetch does not delete an archived post.
+
+The documented X folder endpoint may return `next_token` without documenting a request parameter that accepts it. When the CLI warns about this, report the folder export as a partial available page, never as complete.
 
 ## Errors
 

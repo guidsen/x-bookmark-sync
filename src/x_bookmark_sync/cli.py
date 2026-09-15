@@ -6,11 +6,13 @@ import argparse
 import csv
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Sequence
+from urllib.parse import urlencode
 
 
 ALL_FORMATS = ("json", "csv", "markdown")
@@ -71,6 +73,22 @@ def build_parser() -> argparse.ArgumentParser:
         choices=ALL_FORMATS,
         help="format to write; repeat as needed (default: all)",
     )
+    folders = parser.add_mutually_exclusive_group()
+    folders.add_argument(
+        "--folder",
+        metavar="NAME_OR_ID",
+        help="archive only bookmarks from this folder name or numeric ID",
+    )
+    folders.add_argument(
+        "--folder-id",
+        metavar="ID",
+        help="archive only bookmarks from this numeric folder ID",
+    )
+    folders.add_argument(
+        "--list-folders",
+        action="store_true",
+        help="list bookmark folder names and IDs, then exit",
+    )
     return parser
 
 
@@ -92,8 +110,7 @@ def read_input(path: Path) -> Any:
         raise BookmarkSyncError(f"cannot read input file {path}: {error}") from error
 
 
-def fetch_bookmarks(limit: int) -> Any:
-    command = ["xurl", "bookmarks", "-n", str(limit)]
+def _run_xurl(command: list[str], source: str) -> Any:
     try:
         result = subprocess.run(
             command,
@@ -116,9 +133,122 @@ def fetch_bookmarks(limit: int) -> Any:
                 "xurl is not authenticated for bookmark access; complete OAuth 2.0 user authentication and retry"
             )
         raise BookmarkSyncError(
-            f"xurl bookmarks failed with exit status {result.returncode}; run 'xurl auth status' to check authentication"
+            f"{source} failed with exit status {result.returncode}; run 'xurl auth status' to check authentication"
         )
-    return _decode_json(result.stdout, "xurl bookmarks")
+    return _decode_json(result.stdout, source)
+
+
+def fetch_bookmarks(limit: int) -> Any:
+    return _run_xurl(["xurl", "bookmarks", "-n", str(limit)], "xurl bookmarks")
+
+
+def fetch_current_user_id() -> str:
+    payload = _run_xurl(["xurl", "whoami"], "xurl whoami")
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), dict):
+        raise BookmarkSyncError("malformed xurl whoami output: expected a data object")
+    return _required_string(payload["data"], "id", "authenticated user")
+
+
+def fetch_bookmark_folders(user_id: str) -> list[dict[str, str]]:
+    folders: list[dict[str, str]] = []
+    token: str | None = None
+    seen_tokens: set[str] = set()
+    while True:
+        query: dict[str, str | int] = {"max_results": 100}
+        if token:
+            query["pagination_token"] = token
+        url = f"/2/users/{user_id}/bookmarks/folders?{urlencode(query)}"
+        payload = _run_xurl(["xurl", url], "xurl bookmark folders")
+        if not isinstance(payload, dict) or not isinstance(payload.get("data", []), list):
+            raise BookmarkSyncError("malformed bookmark folders output: 'data' must be a list")
+        if payload.get("errors"):
+            raise BookmarkSyncError("X API returned an error while listing bookmark folders")
+        for index, folder in enumerate(payload.get("data", [])):
+            if not isinstance(folder, dict):
+                raise BookmarkSyncError(f"malformed bookmark folders output: folder {index} is not an object")
+            folders.append(
+                {
+                    "id": _required_string(folder, "id", f"folder {index}"),
+                    "name": _required_string(folder, "name", f"folder {index}"),
+                }
+            )
+        meta = payload.get("meta", {})
+        next_token = meta.get("next_token") if isinstance(meta, dict) else None
+        if not next_token:
+            break
+        token = str(next_token)
+        if token in seen_tokens:
+            raise BookmarkSyncError("bookmark folder pagination returned a repeated token")
+        seen_tokens.add(token)
+    return sorted(folders, key=lambda item: (item["name"].casefold(), item["id"]))
+
+
+def resolve_folder(folders: list[dict[str, str]], value: str, id_only: bool = False) -> dict[str, str]:
+    if id_only or value.isdigit():
+        matches = [folder for folder in folders if folder["id"] == value]
+    else:
+        matches = [folder for folder in folders if folder["name"].casefold() == value.casefold()]
+    if not matches:
+        raise BookmarkSyncError(f"bookmark folder not found: {value}")
+    if len(matches) > 1:
+        ids = ", ".join(folder["id"] for folder in matches)
+        raise BookmarkSyncError(f"multiple bookmark folders are named {value!r}; use --folder-id with one of: {ids}")
+    return matches[0]
+
+
+def fetch_folder_post_ids(user_id: str, folder_id: str) -> list[str]:
+    url = f"/2/users/{user_id}/bookmarks/folders/{folder_id}"
+    payload = _run_xurl(["xurl", url], "xurl folder bookmarks")
+    if not isinstance(payload, dict) or not isinstance(payload.get("data", []), list):
+        raise BookmarkSyncError("malformed folder bookmarks output: 'data' must be a list")
+    if payload.get("errors"):
+        raise BookmarkSyncError("X API returned an error while fetching folder bookmarks")
+    post_ids = []
+    for index, post in enumerate(payload.get("data", [])):
+        if not isinstance(post, dict):
+            raise BookmarkSyncError(f"malformed folder bookmarks output: post {index} is not an object")
+        post_ids.append(_required_string(post, "id", f"folder post {index}"))
+    meta = payload.get("meta", {})
+    if isinstance(meta, dict) and meta.get("next_token"):
+        print(
+            "warning: X returned more folder bookmarks, but its documented folder endpoint does not accept a pagination token; this export contains the available page only",
+            file=sys.stderr,
+        )
+    return post_ids
+
+
+def hydrate_posts(post_ids: list[str]) -> dict[str, Any]:
+    all_posts: list[Any] = []
+    users_by_id: dict[str, Any] = {}
+    for start in range(0, len(post_ids), 100):
+        chunk = post_ids[start : start + 100]
+        query = urlencode(
+            {
+                "ids": ",".join(chunk),
+                "tweet.fields": "created_at,author_id",
+                "expansions": "author_id",
+                "user.fields": "id,name,username",
+            }
+        )
+        payload = _run_xurl(["xurl", f"/2/tweets?{query}"], "xurl post lookup")
+        if not isinstance(payload, dict) or not isinstance(payload.get("data", []), list):
+            raise BookmarkSyncError("malformed post lookup output: 'data' must be a list")
+        all_posts.extend(payload.get("data", []))
+        includes = payload.get("includes", {})
+        if isinstance(includes, dict) and isinstance(includes.get("users", []), list):
+            for user in includes["users"]:
+                if isinstance(user, dict) and user.get("id") is not None:
+                    users_by_id[str(user["id"])] = user
+    return {"data": all_posts, "includes": {"users": list(users_by_id.values())}}
+
+
+def fetch_folder_bookmarks(user_id: str, folder_id: str) -> Any:
+    return hydrate_posts(fetch_folder_post_ids(user_id, folder_id))
+
+
+def folder_slug(folder: dict[str, str]) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", folder["name"].casefold()).strip("-") or "folder"
+    return f"{slug}-{folder['id']}"
 
 
 def _required_string(mapping: dict[str, Any], key: str, context: str) -> str:
@@ -279,8 +409,24 @@ def export_markdown(path: Path, bookmarks: list[dict[str, Any]]) -> None:
 
 def run(args: argparse.Namespace) -> tuple[list[dict[str, Any]], list[Path]]:
     output_dir = args.output_dir.expanduser()
+    if args.input and (args.folder or args.folder_id):
+        raise BookmarkSyncError("--input cannot be combined with --folder or --folder-id")
+    if args.folder_id and (not args.folder_id.isdigit() or len(args.folder_id) > 19):
+        raise BookmarkSyncError("--folder-id must be a numeric X folder ID of at most 19 digits")
+
+    if args.input:
+        raw_payload = read_input(args.input.expanduser())
+    elif args.folder or args.folder_id:
+        user_id = fetch_current_user_id()
+        folders = fetch_bookmark_folders(user_id)
+        value = args.folder_id or args.folder
+        folder = resolve_folder(folders, value, id_only=bool(args.folder_id))
+        output_dir = output_dir / "folders" / folder_slug(folder)
+        raw_payload = fetch_folder_bookmarks(user_id, folder["id"])
+    else:
+        raw_payload = fetch_bookmarks(args.limit)
+
     archive_path = output_dir / "bookmarks.json"
-    raw_payload = read_input(args.input.expanduser()) if args.input else fetch_bookmarks(args.limit)
     latest = parse_api_response(raw_payload)
     merged = merge_bookmarks(load_archive(archive_path), latest)
     formats = tuple(dict.fromkeys(args.formats or ALL_FORMATS))
@@ -301,6 +447,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.list_folders:
+            if args.input:
+                raise BookmarkSyncError("--input cannot be combined with --list-folders")
+            folders = fetch_bookmark_folders(fetch_current_user_id())
+            if not folders:
+                print("No bookmark folders found.")
+            else:
+                print("ID\tNAME")
+                for folder in folders:
+                    print(f"{folder['id']}\t{folder['name']}")
+            return 0
         bookmarks, paths = run(args)
     except BookmarkSyncError as error:
         print(f"error: {error}", file=sys.stderr)

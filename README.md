@@ -27,6 +27,7 @@ A small, dependency-free Python CLI that uses the official [`xurl`](https://gith
 - Preserves archived IDs that are not in the newest response.
 - Produces deterministic output ordered by creation time and post ID, newest first.
 - Reads fixture JSON with `--input`, without running `xurl`—useful for tests and offline exports.
+- Lists X bookmark folders and archives a specific folder by name or ID.
 
 It does not read or inspect xurl's credential files, and it never asks xurl to print a token.
 
@@ -165,9 +166,34 @@ Default files are:
 
 The program reads `OUTPUT_DIR/bookmarks.json` before every export when it exists. Keep `json` among selected formats if you customize `--format`; otherwise the latest merge is exported for that run but is not persisted back to the canonical archive. Writes are atomic, but normal backups are still recommended.
 
+### Bookmark folders
+
+List the folders available to the authenticated X account:
+
+```bash
+x-bookmark-sync --list-folders
+```
+
+Archive one folder using its name or ID:
+
+```bash
+x-bookmark-sync --folder "AI Research" --output-dir ./archive
+x-bookmark-sync --folder-id 1234567890123456789 --output-dir ./archive
+```
+
+Folder names are matched case-insensitively. Numeric values passed to `--folder` are treated as IDs. Folder archives are kept separate from the main archive under:
+
+```text
+OUTPUT_DIR/folders/FOLDER-SLUG-FOLDER-ID/bookmarks.{json,csv,md}
+```
+
+The X folder endpoint returns Post IDs only. The CLI therefore makes a second API request to retrieve the complete Posts and author information. These requests may incur X API usage charges.
+
 ## Limitations
 
 The `xurl bookmarks` shortcut currently supports only `-n 1` through `-n 100` and does not expose pagination through this utility. A single invocation can therefore see only the latest 100 bookmarks. The local archive grows incrementally across runs: entries captured previously remain even after they fall outside that window. The first run cannot recover older bookmarks that are already beyond the latest 100.
+
+X's documented folder endpoint can return a `next_token`, but its current request specification does not document a matching pagination parameter. If that happens, the CLI exports the available page and prints a warning instead of claiming the folder archive is complete.
 
 Deleted or unbookmarked posts are not removed automatically, because absence from the latest window does not prove removal. Posts unavailable to the API cannot be archived. API behavior, access tiers, and billing are controlled by X.
 

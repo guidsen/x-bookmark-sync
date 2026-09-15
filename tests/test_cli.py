@@ -11,10 +11,15 @@ from unittest import mock
 from x_bookmark_sync.cli import (
     BookmarkSyncError,
     build_parser,
+    fetch_bookmark_folders,
     fetch_bookmarks,
+    fetch_folder_post_ids,
+    folder_slug,
+    hydrate_posts,
     main,
     merge_bookmarks,
     parse_api_response,
+    resolve_folder,
 )
 
 
@@ -42,6 +47,14 @@ class ParserTests(unittest.TestCase):
         )
         self.assertEqual(args.input, Path("sample.json"))
         self.assertEqual(args.formats, ["csv", "markdown"])
+
+    def test_folder_options_are_mutually_exclusive(self):
+        parser = build_parser()
+        self.assertEqual(parser.parse_args(["--folder", "AI"]).folder, "AI")
+        self.assertEqual(parser.parse_args(["--folder-id", "123"]).folder_id, "123")
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                parser.parse_args(["--folder", "AI", "--list-folders"])
 
 
 class DataTests(unittest.TestCase):
@@ -98,6 +111,57 @@ class XurlTests(unittest.TestCase):
             fetch_bookmarks(100)
         self.assertIn("authenticated", str(caught.exception))
         self.assertNotIn(secret, str(caught.exception))
+
+
+class FolderTests(unittest.TestCase):
+    @mock.patch("x_bookmark_sync.cli._run_xurl")
+    def test_lists_all_folder_pages_and_sorts_names(self, run_xurl):
+        run_xurl.side_effect = [
+            {"data": [{"id": "2", "name": "Work"}], "meta": {"next_token": "NEXT"}},
+            {"data": [{"id": "1", "name": "AI"}], "meta": {}},
+        ]
+        folders = fetch_bookmark_folders("42")
+        self.assertEqual(folders, [{"id": "1", "name": "AI"}, {"id": "2", "name": "Work"}])
+        self.assertIn("pagination_token=NEXT", run_xurl.call_args_list[1].args[0][1])
+
+    def test_resolves_folder_by_case_insensitive_name_or_id(self):
+        folders = [{"id": "123", "name": "AI Research"}]
+        self.assertEqual(resolve_folder(folders, "ai research")["id"], "123")
+        self.assertEqual(resolve_folder(folders, "123")["name"], "AI Research")
+        self.assertEqual(folder_slug(folders[0]), "ai-research-123")
+
+    @mock.patch("x_bookmark_sync.cli._run_xurl")
+    def test_folder_post_ids_warn_when_x_reports_an_unpageable_next_token(self, run_xurl):
+        run_xurl.return_value = {"data": [{"id": "10"}], "meta": {"next_token": "MORE"}}
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            self.assertEqual(fetch_folder_post_ids("42", "123"), ["10"])
+        self.assertIn("documented folder endpoint does not accept", stderr.getvalue())
+
+    @mock.patch("x_bookmark_sync.cli._run_xurl")
+    def test_hydrates_folder_post_ids_with_authors(self, run_xurl):
+        run_xurl.return_value = {
+            "data": [{"id": "10", "text": "Folder post", "author_id": "7", "created_at": "2026-01-01T00:00:00Z"}],
+            "includes": {"users": [{"id": "7", "name": "Ada", "username": "ada"}]},
+        }
+        payload = hydrate_posts(["10"])
+        bookmarks = parse_api_response(payload)
+        self.assertEqual(bookmarks[0]["url"], "https://x.com/ada/status/10")
+        request_url = run_xurl.call_args.args[0][1]
+        self.assertIn("%2C", request_url)
+        self.assertIn("expansions=author_id", request_url)
+
+    @mock.patch("x_bookmark_sync.cli.fetch_folder_bookmarks")
+    @mock.patch("x_bookmark_sync.cli.fetch_bookmark_folders")
+    @mock.patch("x_bookmark_sync.cli.fetch_current_user_id", return_value="42")
+    def test_folder_export_uses_isolated_folder_directory(self, _user, folders, folder_bookmarks):
+        folders.return_value = [{"id": "123", "name": "AI Research"}]
+        folder_bookmarks.return_value = json.loads((FIXTURES / "latest.json").read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as temporary:
+            result = main(["--folder", "AI Research", "--output-dir", temporary])
+            self.assertEqual(result, 0)
+            folder_dir = Path(temporary) / "folders" / "ai-research-123"
+            self.assertEqual({path.name for path in folder_dir.iterdir()}, {"bookmarks.json", "bookmarks.csv", "bookmarks.md"})
 
 
 class EndToEndTests(unittest.TestCase):
