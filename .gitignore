@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+coverage.xml
+.coverage
+htmlcov/
+.DS_Store
+
+# Default local exports can contain private bookmark data.
+/bookmarks.json
+/bookmarks.csv
+/bookmarks.md

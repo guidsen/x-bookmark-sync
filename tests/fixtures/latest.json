@@ -1,0 +1,23 @@
+{
+  "data": [
+    {
+      "id": "1890000000000000002",
+      "text": "A second useful post.\nWith two lines.",
+      "author_id": "22",
+      "created_at": "2025-02-02T10:30:00.000Z"
+    },
+    {
+      "id": "1890000000000000001",
+      "text": "A useful post about Python & APIs.",
+      "author_id": "11",
+      "created_at": "2025-02-01T09:00:00.000Z"
+    }
+  ],
+  "includes": {
+    "users": [
+      {"id": "11", "name": "Ada Example", "username": "ada_example"},
+      {"id": "22", "name": "Lin Example", "username": "lin-example"}
+    ]
+  },
+  "meta": {"result_count": 2}
+}
