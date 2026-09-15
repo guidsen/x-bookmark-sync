@@ -69,9 +69,11 @@ X changes its developer portal wording and navigation periodically. The labels b
 
 X may require the account/project to be enrolled in **Production** access and **Pay-per-use** before the bookmarks endpoint is available. Plans, credits, prices, and enrollment screens can change. Review the current terms and spending controls in the portal before making API calls; this project cannot grant API access or bypass plan restrictions.
 
-### 2. Enable OAuth 2.0 user authentication
+### 2. Open User authentication settings and enable OAuth 2.0
 
-Open the app's user-authentication settings and enable **OAuth 2.0**. If the portal asks for an app type, choose the option intended for a **Web App, Automated App, or Bot** rather than a Native App. The exact wording may differ.
+After creating the app, open its app-details page and look for **User authentication settings**. Select **Set up** (or **Edit** if authentication was configured previously). This is where X keeps the OAuth settings; they are not shown on the initial app-creation screen.
+
+Enable **OAuth 2.0**. If the portal asks for an app type, choose the option intended for a **Web App, Automated App, or Bot** rather than a Native App. The exact wording may differ.
 
 Enter these values:
 
