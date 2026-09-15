@@ -4,6 +4,20 @@ A small, dependency-free Python CLI that uses the official [`xurl`](https://gith
 
 > This is an independent utility, not an X Corp. product. API access, pricing, and portal screens can change.
 
+## Table of contents
+
+- [What it does](#what-it-does)
+- [Requirements](#requirements)
+- [Install](#install)
+- [Beginner setup: X Developer Portal and OAuth 2.0](#beginner-setup-x-developer-portal-and-oauth-20)
+- [Usage](#usage)
+- [Limitations](#limitations)
+- [Scheduling](#scheduling)
+- [Install with your coding agent](#install-with-your-coding-agent)
+- [Privacy and security](#privacy-and-security)
+- [Development](#development)
+- [License](#license)
+
 ## What it does
 
 - Runs `xurl bookmarks -n 100` by default.
@@ -167,7 +181,15 @@ A daily cron job on Linux/macOS can keep the incremental archive current:
 
 Use absolute paths, keep the archive and log private, and first run the command interactively under the same OS account to verify xurl authentication. Avoid overly frequent schedules; API calls may incur usage charges.
 
-## Using it with Hermes Agent
+## Install with your coding agent
+
+If your coding agent can access GitHub and run terminal commands, send it this message:
+
+> Install and configure <https://github.com/guidsen/x-bookmark-sync> for me. Follow its README, run the tests, and verify a fixture-based export. Never ask me to paste X credentials or tokens into chat, and never inspect `~/.xurl`. Stop when private X Developer Portal or OAuth input is required and tell me exactly what I need to complete myself.
+
+The agent should be able to clone the repository, install the CLI, test it, and guide you through setup. Creating the X app and entering its credentials remain manual security steps.
+
+### Hermes Agent
 
 The repository includes `skill/x-bookmark-sync/SKILL.md`. To make it available to Hermes, copy the `x-bookmark-sync` skill directory into the active profile's skills directory (normally `$HERMES_HOME/skills/`, or `~/.hermes/skills/` when `HERMES_HOME` is unset), then start a new Hermes session.
 
