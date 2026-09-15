@@ -134,6 +134,32 @@ xurl bookmarks -n 1
 
 A JSON response confirms the endpoint is accessible. A 401/403 can mean an incomplete OAuth grant, wrong default app/user, missing scopes, or unavailable product/plan access. Recheck the portal setup and re-run OAuth after changing scopes.
 
+#### Fix `client-not-enrolled`
+
+If OAuth succeeds but an API request says the app must be attached to a Project or returns `client-not-enrolled`, the token is valid but the app does not have an active X API package. Passing `--username` will not fix this enrollment error.
+
+1. Return to the X Developer Portal or the newer Developer Console linked from it.
+2. Confirm the app belongs to a **Project**, not only the **Standalone Apps** section.
+3. Enroll the Project in the currently offered API package. For new accounts this is commonly **Pay-per-use**.
+4. Confirm the app is in the **Production** environment.
+5. If the portal cannot move a legacy or standalone app, create a new app inside the enrolled Project instead.
+6. Configure the new app's **User authentication settings** with the same callback URL and scopes described above.
+7. Register the new Client ID and Client Secret in xurl under a new local app name, complete OAuth again, and make it the default.
+
+For example, run this privately with the new app's credentials:
+
+```bash
+xurl auth apps add bookmark-sync-ppu \
+  --client-id YOUR_NEW_CLIENT_ID \
+  --client-secret YOUR_NEW_CLIENT_SECRET \
+  --redirect-uri http://localhost:8080/callback
+xurl auth oauth2 YOUR_X_USERNAME --app bookmark-sync-ppu --headless
+xurl auth default bookmark-sync-ppu YOUR_X_USERNAME
+xurl bookmarks -n 1
+```
+
+X changes package names and portal navigation, so follow the current enrollment screen when its wording differs. API calls may incur usage charges.
+
 ## Usage
 
 Export the latest 100 bookmarks into `./archive`:
